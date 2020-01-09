@@ -296,6 +296,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 - Fixed a warning in raytracingshadowfilter.compute
 - Fixed issue with AO breaking with small near plane values.
 - Fixed custom post process Cleanup function not called in some cases.
+- Fixing unnecessary memory allocations in the ray tracing cluster build
 
 ### Changed
 - Color buffer pyramid is not allocated anymore if neither refraction nor distortion are enabled
