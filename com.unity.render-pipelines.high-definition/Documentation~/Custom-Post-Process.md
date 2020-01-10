@@ -14,11 +14,15 @@ This example shows you how to create a **grayscale** effect. To get started:
 
 1. Create a **C# Custom Post Process** file (right click in the Assets folder: **Create > Rendering > C# Post Process Volume**) and call it **GrayScale**. Note that, because of how serialization works in Unity, the file name and the class name must be identical or Unity does not serialize it properly.
 
-2. Copy the example code from the [GrayScale C# script section](#CSharp) into your** C# Post Process Volume**.
+2. Copy the example code from the [GrayScale C# script section](#CSharp) into your **C# Post Process Volume**.
 
 3. Create a full screen post-process Shader (right click in the Assets folder: **Create > Shader > HDRP > Post Process**) and call it **GrayScale**.
 
 4. Copy the example code from the [GrayScale Shader section](#Shader) into your post-process Shader.
+
+5. Add the **GrayScale** effect to the list of custom post processes executed in your project: navigate to **Edit > Project Settings > HDRP Default Settings** and click on the **+** of the **After Post Process** list at the bottom of the panel, then select **GrayScale**.
+
+6. Now you can add the **GrayScale** post process to one of the **Volume** in your scene. To change the effect settings, click the small `all` text just below the foldout arrow and play with the **Intensity** slider.
 
 5. Optionally, you can create a custom editor for your post-processing effect. For information on how to do this, see [custom editor](#CustomEditor).
 
