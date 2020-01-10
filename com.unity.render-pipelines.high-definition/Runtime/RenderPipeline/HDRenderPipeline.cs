@@ -1678,15 +1678,15 @@ namespace UnityEngine.Rendering.HighDefinition
                         }
                     }
 
-                    var cmd = CommandBufferPool.Get("");
-
-                    using (new ProfilingScope(cmd, ProfilingSampler.Get(HDProfileId.HDRenderPipelineAllRenderRequest)))
+                    using (new ProfilingScope(null, ProfilingSampler.Get(HDProfileId.HDRenderPipelineAllRenderRequest)))
                     {
                         // Execute render request graph, in reverse order
                         for (int i = renderRequestIndicesToRender.Count - 1; i >= 0; --i)
                         {
                             var renderRequestIndex = renderRequestIndicesToRender[i];
                             var renderRequest = renderRequests[renderRequestIndex];
+
+                            var cmd = CommandBufferPool.Get("");
 
                             // TODO: Avoid the intermediate target and render directly into final target
                             //  CommandBuffer.Blit does not work on Cubemap faces
@@ -1760,16 +1760,10 @@ namespace UnityEngine.Rendering.HighDefinition
                             PropagateScreenSpaceShadowData();
 
                             renderContext.ExecuteCommandBuffer(cmd);
+                            CommandBufferPool.Release(cmd);
                             renderContext.Submit();
-                            cmd.Clear();
                         }
                     }
-
-                    // Execute the last command in the command buffer (added by the ProfilingScope Dispose())
-                    renderContext.ExecuteCommandBuffer(cmd);
-                    renderContext.Submit();
-
-                    CommandBufferPool.Release(cmd);
                 }
             }
 
