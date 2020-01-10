@@ -24,7 +24,7 @@ This example shows you how to create a **grayscale** effect. To get started:
 
 6. Now you can add the **GrayScale** post process to one of the **Volume** in your scene. To change the effect settings, click the small `all` text just below the foldout arrow and play with the **Intensity** slider.
 
-5. Optionally, you can create a custom editor for your post-processing effect. For information on how to do this, see [custom editor](#CustomEditor).
+7. Optionally, you can create a custom editor for your post-processing effect. For information on how to do this, see [custom editor](#CustomEditor).
 
 <a name="CSharp"></a>
 
