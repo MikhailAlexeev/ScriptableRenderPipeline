@@ -174,6 +174,12 @@ namespace UnityEngine.Rendering.HighDefinition
         public bool                     isBakedShadowMask;
     }
 
+    internal struct ProcessedProbeData
+    {
+        public HDProbe  hdProbe;
+        public float    weight;
+    }
+
     public partial class HDRenderPipeline
     {
         internal const int k_MaxCacheSize = 2000000000; //2 GigaByte
@@ -428,6 +434,8 @@ namespace UnityEngine.Rendering.HighDefinition
         // Keep sorting array around to avoid garbage
         uint[] m_SortKeys = null;
         DynamicArray<ProcessedLightData> m_ProcessedLightData = new DynamicArray<ProcessedLightData>();
+        DynamicArray<ProcessedProbeData> m_ProcessedReflectionProbeData = new DynamicArray<ProcessedProbeData>();
+        DynamicArray<ProcessedProbeData> m_ProcessedPlanarProbeData = new DynamicArray<ProcessedProbeData>();
 
         void UpdateSortKeysArray(int count)
         {
@@ -1689,24 +1697,10 @@ namespace UnityEngine.Rendering.HighDefinition
             m_lightList.lightsPerView[viewIndex].lightVolumes.Add(lightVolumeData);
         }
 
-        internal bool GetEnvLightData(CommandBuffer cmd, HDCamera hdCamera, HDProbe probe, DebugDisplaySettings debugDisplaySettings, ref EnvLightData envLightData)
+        internal bool GetEnvLightData(CommandBuffer cmd, HDCamera hdCamera, in ProcessedProbeData processedProbe, DebugDisplaySettings debugDisplaySettings, ref EnvLightData envLightData)
         {
             Camera camera = hdCamera.camera;
-
-            // For now we won't display real time probe when rendering one.
-            // TODO: We may want to display last frame result but in this case we need to be careful not to update the atlas before all realtime probes are rendered (for frame coherency).
-            // Unfortunately we don't have this information at the moment.
-            if (probe.mode == ProbeSettings.Mode.Realtime && camera.cameraType == CameraType.Reflection)
-                return false;
-
-            // Discard probe if disabled in debug menu
-            if (!debugDisplaySettings.data.lightingDebugSettings.showReflectionProbe)
-                return false;
-
-            // Discard probe if its distance is too far or if its weight is at 0
-            float weight = HDUtils.ComputeWeightedLinearFadeDistance(probe.transform.position, camera.transform.position, probe.weight, probe.fadeDistance);
-            if (weight <= 0f)
-                return false;
+            HDProbe probe = processedProbe.hdProbe;
 
             var capturePosition = Vector3.zero;
             var influenceToWorld = probe.influenceToWorld;
@@ -1770,7 +1764,7 @@ namespace UnityEngine.Rendering.HighDefinition
             InfluenceVolume influence = probe.influenceVolume;
             envLightData.lightLayers = probe.lightLayersAsUInt;
             envLightData.influenceShapeType = influence.envShape;
-            envLightData.weight = weight;
+            envLightData.weight = processedProbe.weight;
             envLightData.multiplier = probe.multiplier * m_indirectLightingController.indirectSpecularIntensity.value;
             envLightData.rangeCompressionFactorCompensation = Mathf.Max(probe.rangeCompressionFactor, 1e-6f);
             envLightData.influenceExtents = influence.extents;
@@ -1938,27 +1932,6 @@ namespace UnityEngine.Rendering.HighDefinition
                 light.bakingOutput.occlusionMaskChannel != -1;     // We need to have an occlusion mask channel assign, else we have no shadow mask
         }
 
-        HDProbe SelectProbe(VisibleReflectionProbe probe, PlanarReflectionProbe planarProbe)
-        {
-            if (probe.reflectionProbe != null)
-            {
-                var add = probe.reflectionProbe.GetComponent<HDAdditionalReflectionData>();
-                if (add == null)
-                {
-                    add = HDUtils.s_DefaultHDAdditionalReflectionData;
-                    Vector3 distance = Vector3.one * probe.blendDistance;
-                    add.influenceVolume.boxBlendDistancePositive = distance;
-                    add.influenceVolume.boxBlendDistanceNegative = distance;
-                    add.influenceVolume.shape = InfluenceShape.Box;
-                }
-                return add;
-            }
-            if (planarProbe != null)
-                return planarProbe;
-
-            throw new ArgumentException();
-        }
-
         internal static void EvaluateGPULightType(HDLightType lightType, SpotLightShape spotLightShape, AreaLightShape areaLightShape,
             ref LightCategory lightCategory, ref GPULightType gpuLightType, ref LightVolumeType lightVolumeType)
         {
@@ -2080,7 +2053,7 @@ namespace UnityEngine.Rendering.HighDefinition
 
         // This will go through the list of all visible light and do two main things:
         // - Precompute data that will be reused through the light loop
-        // - Discard all lights considered unnecessary (too far away, explicitely discarded by type, ...)
+        // - Discard all lights considered unnecessary (too far away, explicitly discarded by type, ...)
         int PreprocessVisibleLights(HDCamera hdCamera, CullingResults cullResults, DebugDisplaySettings debugDisplaySettings, in AOVRequestData aovRequest)
         {
             var hdShadowSettings = hdCamera.volumeStack.GetComponent<HDShadowSettings>();
@@ -2302,9 +2275,187 @@ namespace UnityEngine.Rendering.HighDefinition
             m_lightList.areaLightCount = areaLightCount;
         }
 
+        bool TrivialRejectProbe(in ProcessedProbeData processedProbe, HDCamera hdCamera)
+        {
+            // For now we won't display real time probe when rendering one.
+            // TODO: We may want to display last frame result but in this case we need to be careful not to update the atlas before all realtime probes are rendered (for frame coherency).
+            // Unfortunately we don't have this information at the moment.
+            if (processedProbe.hdProbe.mode == ProbeSettings.Mode.Realtime && hdCamera.camera.cameraType == CameraType.Reflection)
+                return true;
+
+            // Discard probe if disabled in debug menu
+            if (!debugDisplaySettings.data.lightingDebugSettings.showReflectionProbe)
+                return true;
+
+            // Discard probe if its distance is too far or if its weight is at 0
+            if (processedProbe.weight <= 0f)
+                return true;
+
+            // Exclude env lights based on hdCamera.probeLayerMask
+            if ((hdCamera.probeLayerMask.value & (1 << processedProbe.hdProbe.gameObject.layer)) == 0)
+                return true;
+
+            // probe.texture can be null when we are adding a reflection probe in the editor
+            if (processedProbe.hdProbe.texture == null)
+                return true;
+
+            return false;
+        }
+
+        internal static void PreprocessReflectionProbeData(ref ProcessedProbeData processedData, VisibleReflectionProbe probe, HDCamera hdCamera)
+        {
+            var add = probe.reflectionProbe.GetComponent<HDAdditionalReflectionData>();
+            if (add == null)
+            {
+                add = HDUtils.s_DefaultHDAdditionalReflectionData;
+                Vector3 distance = Vector3.one * probe.blendDistance;
+                add.influenceVolume.boxBlendDistancePositive = distance;
+                add.influenceVolume.boxBlendDistanceNegative = distance;
+                add.influenceVolume.shape = InfluenceShape.Box;
+            }
+
+            PreprocessProbeData(ref processedData, add, hdCamera);
+        }
+
+        internal static void PreprocessProbeData(ref ProcessedProbeData processedData, HDProbe probe, HDCamera hdCamera)
+        {
+            processedData.hdProbe = probe;
+            processedData.weight = HDUtils.ComputeWeightedLinearFadeDistance(processedData.hdProbe.transform.position, hdCamera.camera.transform.position, processedData.hdProbe.weight, processedData.hdProbe.fadeDistance);
+        }
+
+        int PreprocessVisibleProbes(HDCamera hdCamera, CullingResults cullResults, HDProbeCullingResults hdProbeCullingResults, in AOVRequestData aovRequest)
+        {
+            var debugLightFilter = debugDisplaySettings.GetDebugLightFilterMode();
+            var hasDebugLightFilter = debugLightFilter != DebugLightFilterMode.None;
+
+            // Redo everything but this time with envLights
+            Debug.Assert(m_MaxEnvLightsOnScreen <= 256); //for key construction
+            int envLightCount = 0;
+
+            var totalProbes = cullResults.visibleReflectionProbes.Length + hdProbeCullingResults.visibleProbes.Count;
+
+            m_ProcessedReflectionProbeData.Resize(cullResults.visibleReflectionProbes.Length);
+            m_ProcessedPlanarProbeData.Resize(hdProbeCullingResults.visibleProbes.Count);
+
+            int maxProbeCount = Math.Min(totalProbes, m_MaxEnvLightsOnScreen);
+            UpdateSortKeysArray(maxProbeCount);
+
+            var enableReflectionProbes = hdCamera.frameSettings.IsEnabled(FrameSettingsField.ReflectionProbe) &&
+                                            (!hasDebugLightFilter || debugLightFilter.IsEnabledFor(ProbeSettings.ProbeType.ReflectionProbe));
+
+            var enablePlanarProbes = hdCamera.frameSettings.IsEnabled(FrameSettingsField.PlanarProbe) &&
+                                        (!hasDebugLightFilter || debugLightFilter.IsEnabledFor(ProbeSettings.ProbeType.PlanarProbe));
+
+            if (enableReflectionProbes)
+            {
+                for (int probeIndex = 0; probeIndex < cullResults.visibleReflectionProbes.Length; probeIndex++)
+                {
+                    var probe = cullResults.visibleReflectionProbes[probeIndex];
+
+                    ref ProcessedProbeData processedData = ref m_ProcessedReflectionProbeData[probeIndex];
+                    PreprocessReflectionProbeData(ref processedData, probe, hdCamera);
+
+                    if (TrivialRejectProbe(processedData, hdCamera))
+                        continue;
+
+                    if (probe.reflectionProbe == null
+                        || probe.reflectionProbe.Equals(null) || !probe.reflectionProbe.isActiveAndEnabled
+                        || !aovRequest.IsLightEnabled(probe.reflectionProbe.gameObject))
+                        continue;
+
+                    // Work around the data issues.
+                    if (probe.localToWorldMatrix.determinant == 0)
+                    {
+                        Debug.LogError("Reflection probe " + probe.reflectionProbe.name + " has an invalid local frame and needs to be fixed.");
+                        continue;
+                    }
+
+                    // This test needs to be the last one otherwise we may consume an available slot and then discard the probe.
+                    if (envLightCount >= maxProbeCount)
+                        continue;
+
+                    LightVolumeType lightVolumeType = LightVolumeType.Box;
+                    if (processedData.hdProbe != null && processedData.hdProbe.influenceVolume.shape == InfluenceShape.Sphere)
+                        lightVolumeType = LightVolumeType.Sphere;
+
+                    var logVolume = CalculateProbeLogVolume(probe.bounds);
+
+                    m_SortKeys[envLightCount++] = PackProbeKey(logVolume, lightVolumeType, 0u, probeIndex); // Sort by volume
+                }
+            }
+
+            if (enablePlanarProbes)
+            {
+                for (int planarProbeIndex = 0; planarProbeIndex < hdProbeCullingResults.visibleProbes.Count; planarProbeIndex++)
+                {
+                    var probe = hdProbeCullingResults.visibleProbes[planarProbeIndex];
+
+                    ref ProcessedProbeData processedData = ref m_ProcessedPlanarProbeData[planarProbeIndex];
+                    PreprocessProbeData(ref processedData, probe, hdCamera);
+
+                    if (!aovRequest.IsLightEnabled(probe.gameObject))
+                        continue;
+
+                    // This test needs to be the last one otherwise we may consume an available slot and then discard the probe.
+                    if (envLightCount >= maxProbeCount)
+                        continue;
+
+                    var lightVolumeType = LightVolumeType.Box;
+                    if (probe.influenceVolume.shape == InfluenceShape.Sphere)
+                        lightVolumeType = LightVolumeType.Sphere;
+
+                    var logVolume = CalculateProbeLogVolume(probe.bounds);
+
+                    m_SortKeys[envLightCount++] = PackProbeKey(logVolume, lightVolumeType, 1u, planarProbeIndex); // Sort by volume
+                }
+            }
+
+            // Not necessary yet but call it for future modification with sphere influence volume
+            CoreUnsafeUtils.QuickSort(m_SortKeys, 0, envLightCount - 1); // Call our own quicksort instead of Array.Sort(sortKeys, 0, sortCount) so we don't allocate memory (note the SortCount-1 that is different from original call).
+            return envLightCount;
+        }
+
+        void PrepareGPUProbeData(CommandBuffer cmd, HDCamera hdCamera, CullingResults cullResults, HDProbeCullingResults hdProbeCullingResults, int processedLightCount)
+        {
+            Vector3 camPosWS = hdCamera.mainViewConstants.worldSpaceCameraPos;
+
+            for (int sortIndex = 0; sortIndex < processedLightCount; ++sortIndex)
+            {
+                // In 1. we have already classify and sorted the light, we need to use this sorted order here
+                uint sortKey = m_SortKeys[sortIndex];
+                LightVolumeType lightVolumeType;
+                int probeIndex;
+                int listType;
+                UnpackProbeSortKey(sortKey, out lightVolumeType, out probeIndex, out listType);
+
+                ProcessedProbeData processedProbe = (listType == 0) ? m_ProcessedReflectionProbeData[probeIndex] : m_ProcessedPlanarProbeData[probeIndex];
+
+                EnvLightData envLightData = new EnvLightData();
+
+                if (GetEnvLightData(cmd, hdCamera, processedProbe, debugDisplaySettings, ref envLightData))
+                {
+                    // it has been filled
+                    m_lightList.envLights.Add(envLightData);
+
+                    for (int viewIndex = 0; viewIndex < hdCamera.viewCount; ++viewIndex)
+                    {
+                        var worldToView = GetWorldToViewMatrix(hdCamera, viewIndex);
+                        GetEnvLightVolumeDataAndBound(processedProbe.hdProbe, lightVolumeType, worldToView, viewIndex);
+                    }
+
+                    // We make the light position camera-relative as late as possible in order
+                    // to allow the preceding code to work with the absolute world space coordinates.
+                    UpdateEnvLighCameraRelativetData(ref envLightData, camPosWS);
+
+                    int last = m_lightList.envLights.Count - 1;
+                    m_lightList.envLights[last] = envLightData;
+                }
+            }
+        }
+
         // Return true if BakedShadowMask are enabled
         bool PrepareLightsForGPU(CommandBuffer cmd, HDCamera hdCamera, CullingResults cullResults,
-            HDProbeCullingResults hdProbeCullingResults, DensityVolumeList densityVolumes, DebugDisplaySettings debugDisplaySettings, AOVRequestData aovRequest)
+        HDProbeCullingResults hdProbeCullingResults, DensityVolumeList densityVolumes, DebugDisplaySettings debugDisplaySettings, AOVRequestData aovRequest)
         {
             var debugLightFilter = debugDisplaySettings.GetDebugLightFilterMode();
             var hasDebugLightFilter = debugLightFilter != DebugLightFilterMode.None;
@@ -2341,147 +2492,19 @@ namespace UnityEngine.Rendering.HighDefinition
                 }
 
                 // Note: Light with null intensity/Color are culled by the C++, no need to test it here
-                if (cullResults.visibleLights.Length != 0 || cullResults.visibleReflectionProbes.Length != 0 || hdProbeCullingResults.visibleProbes.Count != 0)
+                if (cullResults.visibleLights.Length != 0)
                 {
-                    // Prepare data for lights
                     int processedLightCount = PreprocessVisibleLights(hdCamera, cullResults, debugDisplaySettings, aovRequest);
                     PrepareGPULightdata(cmd, hdCamera, cullResults, processedLightCount);
 
                     // Update the compute buffer with the shadow request datas
                     m_ShadowManager.PrepareGPUShadowDatas(cullResults, hdCamera);
+                }
 
-                    // Redo everything but this time with envLights
-                    Debug.Assert(m_MaxEnvLightsOnScreen <= 256); //for key construction
-                    int envLightCount = 0;
-
-                    var totalProbes = cullResults.visibleReflectionProbes.Length + hdProbeCullingResults.visibleProbes.Count;
-                    int probeCount = Math.Min(totalProbes, m_MaxEnvLightsOnScreen);
-                    UpdateSortKeysArray(probeCount);
-                    int sortCount = 0;
-
-                    var enableReflectionProbes =    hdCamera.frameSettings.IsEnabled(FrameSettingsField.ReflectionProbe) &&
-                                                    (!hasDebugLightFilter || debugLightFilter.IsEnabledFor(ProbeSettings.ProbeType.ReflectionProbe));
-
-                    var enablePlanarProbes =    hdCamera.frameSettings.IsEnabled(FrameSettingsField.PlanarProbe) &&
-                                                (!hasDebugLightFilter || debugLightFilter.IsEnabledFor(ProbeSettings.ProbeType.PlanarProbe));
-
-                    for (int probeIndex = 0, numProbes = totalProbes; (probeIndex < numProbes) && (sortCount < probeCount); probeIndex++)
-                    {
-                        if (probeIndex < cullResults.visibleReflectionProbes.Length)
-                        {
-                            if (!enableReflectionProbes)
-                            {
-                                // Skip directly to planar probes
-                                probeIndex = cullResults.visibleReflectionProbes.Length - 1;
-                                continue;
-                            }
-
-                            var probe = cullResults.visibleReflectionProbes[probeIndex];
-                            if (probe.reflectionProbe == null
-                                || probe.reflectionProbe.Equals(null) || !probe.reflectionProbe.isActiveAndEnabled
-                                || !aovRequest.IsLightEnabled(probe.reflectionProbe.gameObject))
-                                continue;
-
-                            // Exclude env lights based on hdCamera.probeLayerMask
-                            if ((hdCamera.probeLayerMask.value & (1 << probe.reflectionProbe.gameObject.layer)) == 0)
-                                continue;
-
-                            var additional = probe.reflectionProbe.GetComponent<HDAdditionalReflectionData>();
-
-                            // probe.texture can be null when we are adding a reflection probe in the editor
-                            if (additional.texture == null || envLightCount >= m_MaxEnvLightsOnScreen)
-                                continue;
-
-                            // Work around the data issues.
-                            if (probe.localToWorldMatrix.determinant == 0)
-                            {
-                                Debug.LogError("Reflection probe " + probe.reflectionProbe.name + " has an invalid local frame and needs to be fixed.");
-                                continue;
-                            }
-
-                            LightVolumeType lightVolumeType = LightVolumeType.Box;
-                            if (additional != null && additional.influenceVolume.shape == InfluenceShape.Sphere)
-                                lightVolumeType = LightVolumeType.Sphere;
-                            ++envLightCount;
-
-                            var logVolume = CalculateProbeLogVolume(probe.bounds);
-
-                            m_SortKeys[sortCount++] = PackProbeKey(logVolume, lightVolumeType, 0u, probeIndex); // Sort by volume
-                        }
-                        else
-                        {
-                            if (!enablePlanarProbes)
-                                // skip planar probes
-                                break;
-
-                            var planarProbeIndex = probeIndex - cullResults.visibleReflectionProbes.Length;
-                            var probe = hdProbeCullingResults.visibleProbes[planarProbeIndex];
-                            if (!aovRequest.IsLightEnabled(probe.gameObject))
-                                continue;
-
-                            // probe.texture can be null when we are adding a reflection probe in the editor
-                            if (probe.texture == null || envLightCount >= k_MaxEnvLightsOnScreen)
-                                continue;
-
-                            // Exclude env lights based on hdCamera.probeLayerMask
-                            if ((hdCamera.probeLayerMask.value & (1 << probe.gameObject.layer)) == 0)
-                                continue;
-
-                            var lightVolumeType = LightVolumeType.Box;
-                            if (probe.influenceVolume.shape == InfluenceShape.Sphere)
-                                lightVolumeType = LightVolumeType.Sphere;
-                            ++envLightCount;
-
-                            var logVolume = CalculateProbeLogVolume(probe.bounds);
-
-                            m_SortKeys[sortCount++] = PackProbeKey(logVolume, lightVolumeType, 1u, planarProbeIndex); // Sort by volume
-                        }
-                    }
-
-                    // Not necessary yet but call it for future modification with sphere influence volume
-                    CoreUnsafeUtils.QuickSort(m_SortKeys, 0, sortCount - 1); // Call our own quicksort instead of Array.Sort(sortKeys, 0, sortCount) so we don't allocate memory (note the SortCount-1 that is different from original call).
-
-                    Vector3 camPosWS = hdCamera.mainViewConstants.worldSpaceCameraPos;
-
-                    for (int sortIndex = 0; sortIndex < sortCount; ++sortIndex)
-                    {
-                        // In 1. we have already classify and sorted the light, we need to use this sorted order here
-                        uint sortKey = m_SortKeys[sortIndex];
-                        LightVolumeType lightVolumeType;
-                        int probeIndex;
-                        int listType;
-                        UnpackProbeSortKey(sortKey, out lightVolumeType, out probeIndex, out listType);
-
-                        PlanarReflectionProbe planarProbe = null;
-                        VisibleReflectionProbe probe = default(VisibleReflectionProbe);
-                        if (listType == 0)
-                            probe = cullResults.visibleReflectionProbes[probeIndex];
-                        else
-                            planarProbe = (PlanarReflectionProbe)hdProbeCullingResults.visibleProbes[probeIndex];
-
-                        var probeWrapper = SelectProbe(probe, planarProbe);
-
-                        EnvLightData envLightData = new EnvLightData();
-
-                        if (GetEnvLightData(cmd, hdCamera, probeWrapper, debugDisplaySettings, ref envLightData))
-                        {
-                            // it has been filled
-                            m_lightList.envLights.Add(envLightData);
-
-                            for (int viewIndex = 0; viewIndex < hdCamera.viewCount; ++viewIndex)
-                            {
-                                var worldToView = GetWorldToViewMatrix(hdCamera, viewIndex);
-                                GetEnvLightVolumeDataAndBound(probeWrapper, lightVolumeType, worldToView, viewIndex);
-                            }
-
-                            // We make the light position camera-relative as late as possible in order
-                            // to allow the preceding code to work with the absolute world space coordinates.
-                            UpdateEnvLighCameraRelativetData(ref envLightData, camPosWS);
-
-                            int last = m_lightList.envLights.Count - 1;
-                            m_lightList.envLights[last] = envLightData;
-                        }
-                    }
+                if (cullResults.visibleReflectionProbes.Length != 0 || hdProbeCullingResults.visibleProbes.Count != 0)
+                {
+                    int processedProbesCount = PreprocessVisibleProbes(hdCamera, cullResults, hdProbeCullingResults, aovRequest);
+                    PrepareGPUProbeData(cmd, hdCamera, cullResults, hdProbeCullingResults, processedProbesCount);
                 }
 
                 HDShadowManager.instance.CheckForCulledCachedShadows();
