@@ -1097,14 +1097,9 @@ namespace UnityEngine.Rendering.HighDefinition
             }
         }
 
-        internal bool GetDirectionalLightData(CommandBuffer cmd, HDCamera hdCamera, VisibleLight light,
-            Light lightComponent, int lightIndex, int shadowIndex,
+        internal void GetDirectionalLightData(CommandBuffer cmd, HDCamera hdCamera, VisibleLight light, Light lightComponent, int lightIndex, int shadowIndex,
             DebugDisplaySettings debugDisplaySettings, int sortedIndex, bool isPhysicallyBasedSkyActive, ref int screenSpaceShadowIndex, ref int screenSpaceShadowslot)
         {
-            // Clamp light list to the maximum allowed lights on screen to avoid ComputeBuffer overflow
-            if (m_lightList.directionalLights.Count >= m_MaxDirectionalLightsOnScreen)
-                return false;
-
             var processedData = m_ProcessedLightData[lightIndex];
             var additionalLightData = processedData.additionalLightData;
             var gpuLightType = processedData.gpuLightType;
@@ -1235,8 +1230,6 @@ namespace UnityEngine.Rendering.HighDefinition
             m_CurrentSunLight = m_CurrentSunLight == null ? lightComponent : m_CurrentSunLight;
 
             m_lightList.directionalLights.Add(lightData);
-
-            return true;
         }
 
         // This function evaluates if there is currently enough screen space sahdow slots of a given light based on its light type
@@ -1253,14 +1246,9 @@ namespace UnityEngine.Rendering.HighDefinition
             }
         }
 
-        internal bool GetLightData(CommandBuffer cmd, HDCamera hdCamera, HDShadowSettings shadowSettings,
-            VisibleLight light, Light lightComponent,
+        internal void GetLightData(CommandBuffer cmd, HDCamera hdCamera, HDShadowSettings shadowSettings, VisibleLight light, Light lightComponent,
             int lightIndex, int shadowIndex, ref Vector3 lightDimensions, DebugDisplaySettings debugDisplaySettings, ref int screenSpaceShadowIndex, ref int screenSpaceChannelSlot)
         {
-            // Clamp light list to the maximum allowed lights on screen to avoid ComputeBuffer overflow
-            if (m_lightList.lights.Count >= m_MaxPunctualLightsOnScreen + m_MaxAreaLightsOnScreen)
-                return false;
-
             var processedData = m_ProcessedLightData[lightIndex];
             var additionalLightData = processedData.additionalLightData;
             var gpuLightType = processedData.gpuLightType;
@@ -1515,8 +1503,6 @@ namespace UnityEngine.Rendering.HighDefinition
             }
 
             m_lightList.lights.Add(lightData);
-
-            return true;
         }
 
         // TODO: we should be able to do this calculation only with LightData without VisibleLight light, but for now pass both
@@ -2211,29 +2197,28 @@ namespace UnityEngine.Rendering.HighDefinition
                 // Directional rendering side, it is separated as it is always visible so no volume to handle here
                 if (gpuLightType == GPULightType.Directional)
                 {
-                    if (GetDirectionalLightData(cmd, hdCamera, light, lightComponent, lightIndex, shadowIndex, debugDisplaySettings, directionalLightcount, isPbrSkyActive, ref m_ScreenSpaceShadowIndex, ref m_ScreenSpaceShadowChannelSlot))
+                    GetDirectionalLightData(cmd, hdCamera, light, lightComponent, lightIndex, shadowIndex, debugDisplaySettings, directionalLightcount, isPbrSkyActive, ref m_ScreenSpaceShadowIndex, ref m_ScreenSpaceShadowChannelSlot);
+
+                    directionalLightcount++;
+
+                    // We make the light position camera-relative as late as possible in order
+                    // to allow the preceding code to work with the absolute world space coordinates.
+                    if (ShaderConfig.s_CameraRelativeRendering != 0)
                     {
-                        directionalLightcount++;
-
-                        // We make the light position camera-relative as late as possible in order
-                        // to allow the preceding code to work with the absolute world space coordinates.
-                        if (ShaderConfig.s_CameraRelativeRendering != 0)
-                        {
-                            // Caution: 'DirectionalLightData.positionWS' is camera-relative after this point.
-                            int last = m_lightList.directionalLights.Count - 1;
-                            DirectionalLightData lightData = m_lightList.directionalLights[last];
-                            lightData.positionRWS -= camPosWS;
-                            m_lightList.directionalLights[last] = lightData;
-                        }
+                        // Caution: 'DirectionalLightData.positionWS' is camera-relative after this point.
+                        int last = m_lightList.directionalLights.Count - 1;
+                        DirectionalLightData lightData = m_lightList.directionalLights[last];
+                        lightData.positionRWS -= camPosWS;
+                        m_lightList.directionalLights[last] = lightData;
                     }
-                    continue;
                 }
-
-                Vector3 lightDimensions = new Vector3(); // X = length or width, Y = height, Z = range (depth)
-
-                // Punctual, area, projector lights - the rendering side.
-                if (GetLightData(cmd, hdCamera, hdShadowSettings, light, lightComponent, lightIndex, shadowIndex, ref lightDimensions, debugDisplaySettings, ref m_ScreenSpaceShadowIndex, ref m_ScreenSpaceShadowChannelSlot))
+                else
                 {
+                    Vector3 lightDimensions = new Vector3(); // X = length or width, Y = height, Z = range (depth)
+
+                    // Punctual, area, projector lights - the rendering side.
+                    GetLightData(cmd, hdCamera, hdShadowSettings, light, lightComponent, lightIndex, shadowIndex, ref lightDimensions, debugDisplaySettings, ref m_ScreenSpaceShadowIndex, ref m_ScreenSpaceShadowChannelSlot);
+
                     switch (lightCategory)
                     {
                         case LightCategory.Punctual:
