@@ -20,9 +20,9 @@ This example shows you how to create a **grayscale** effect. To get started:
 
 4. Copy the example code from the [GrayScale Shader section](#Shader) into your post-process Shader.
 
-5. Add the **GrayScale** effect to the list of custom post processes executed in your project: navigate to **Edit > Project Settings > HDRP Default Settings** and click on the **+** of the **After Post Process** list at the bottom of the panel, then select **GrayScale**.
+5. Add the **GrayScale** effect to the list of custom post-processes that your Project executes. To do this, go to **Edit > Project Settings > HDRP Default Settings** and, at the bottom of the **After Post Process** list, click on the **+**  and select **GrayScale**.
 
-6. Now you can add the **GrayScale** post process override to one of your **Volumes** in the scene. To change the effect settings, click the small `all` text just below the foldout arrow and play with the **Intensity** slider.
+6. Now you can add the **GrayScale** post-process override to a **Volumes** in the Scene. To change the effect settings, click the small `all` text just below the foldout arrow and adjust with the **Intensity** slider.
 
 7. Optionally, you can create a custom editor for your post-processing effect. For information on how to do this, see [custom editor](#CustomEditor).
 
