@@ -304,7 +304,7 @@ Material:
     m_Colors:
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 1, g: 1, b: 1, a: 1}
-    - _EmissiveColor: {r: 11.459142, g: 10.905898, b: 11.43984, a: 11.459142}
+    - _EmissiveColor: {r: 11.459139, g: 10.905895, b: 11.439837, a: 11.459139}
     - _EmissiveColorLDR: {r: 0, g: 0, b: 0, a: 1}
     - _UnlitColor: {r: 0, g: 0, b: 0, a: 1}
   m_BuildTextureStacks: []
@@ -784,6 +784,11 @@ PrefabInstance:
       propertyPath: checkMemoryAllocation
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 114995348509370400, guid: c07ace9ab142ca9469fa377877c2f1e7,
+        type: 3}
+      propertyPath: ImageComparisonSettings.TargetHeight
+      value: 480
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: c07ace9ab142ca9469fa377877c2f1e7, type: 3}
 --- !u!1 &930401665
@@ -1261,7 +1266,7 @@ MonoBehaviour:
   m_AffectSpecular: 1
   m_NonLightmappedOnly: 0
   m_ShapeWidth: 0.5000001
-  m_ShapeHeight: 0.5000006
+  m_ShapeHeight: 0.5000007
   m_AspectRatio: 1
   m_ShapeRadius: 0
   m_SoftnessScale: 1
@@ -1348,7 +1353,7 @@ Light:
   m_Type: 2
   m_Shape: 0
   m_Color: {r: 1, g: 1, b: 1, a: 1}
-  m_Intensity: 11.459142
+  m_Intensity: 11.459139
   m_Range: 10
   m_SpotAngle: 30
   m_InnerSpotAngle: 21.80208
@@ -1389,7 +1394,7 @@ Light:
   m_RenderingLayerMask: 1
   m_Lightmapping: 4
   m_LightShadowCasterMode: 2
-  m_AreaSize: {x: 0.5000001, y: 0.5000006}
+  m_AreaSize: {x: 0.5000001, y: 0.5000007}
   m_BounceIntensity: 1
   m_ColorTemperature: 6570
   m_UseColorTemperature: 1
@@ -1406,7 +1411,7 @@ Transform:
   m_GameObject: {fileID: 1487315808}
   m_LocalRotation: {x: 0.7071068, y: 0, z: 0, w: 0.7071068}
   m_LocalPosition: {x: 0.2075, y: 1.128, z: 0}
-  m_LocalScale: {x: 0.5000001, y: 0.5000006, z: 0.01}
+  m_LocalScale: {x: 0.5000001, y: 0.5000007, z: 0.01}
   m_Children: []
   m_Father: {fileID: 0}
   m_RootOrder: 3
