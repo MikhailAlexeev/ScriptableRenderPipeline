@@ -1765,6 +1765,10 @@ namespace UnityEngine.Rendering.HighDefinition
                         }
                     }
 
+                    // Execute the last command in the command buffer (added by the ProfilingScope Dispose())
+                    renderContext.ExecuteCommandBuffer(cmd);
+                    renderContext.Submit();
+
                     CommandBufferPool.Release(cmd);
                 }
             }
