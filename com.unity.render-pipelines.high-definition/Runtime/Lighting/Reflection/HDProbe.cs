@@ -325,7 +325,19 @@ namespace UnityEngine.Rendering.HighDefinition
         /// </summary>
         public Bounds bounds => influenceVolume.GetBoundsAt(transform.position);
 
-        internal ProbeSettings settings
+        /// <summary>
+        /// Use this property to edit the settings of the probe.
+        ///
+        /// If you intend to read the settings back, you may need the sanitized version <see cref="settings"/>.
+        /// </summary>
+        public ref ProbeSettings settingsRaw => ref m_ProbeSettings;
+
+        /// <summary>
+        /// Use this property to get the settings used for calculations.
+        ///
+        /// This is a sanitized version of the property <see cref="settingsRaw"/>.
+        /// </summary>
+        public ProbeSettings settings
         {
             get
             {
@@ -365,7 +377,7 @@ namespace UnityEngine.Rendering.HighDefinition
 
         void UpdateProbeName()
         {
-            // TODO: ask if this is ok: 
+            // TODO: ask if this is ok:
             if (settings.type == ProbeSettings.ProbeType.PlanarProbe)
             {
                 for (int i = 0; i < 6; i++)
